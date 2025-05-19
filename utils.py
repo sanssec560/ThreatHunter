@@ -16,7 +16,7 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 def convert_sigma_to_spl(sigma_rule, field_mapping=None):
     """
     Convert a Sigma rule to Splunk SPL query
-    Since we don't have sigmac available, this is a simplified version that does basic conversion
+    This implementation is designed to properly handle Splunk's syntax requirements
     
     Args:
         sigma_rule (str): The Sigma rule content
@@ -43,20 +43,66 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
         if not detection:
             return None, "No detection section found in Sigma rule"
         
+        # Process field modifiers
+        def process_field_with_modifiers(field, mapped_field):
+            # Handle common Sigma field modifiers
+            if '|contains' in field:
+                base_field = field.split('|')[0]
+                if field_mapping and base_field in field_mapping:
+                    mapped_base = field_mapping[base_field]
+                else:
+                    mapped_base = base_field
+                return mapped_base, "contains"
+            elif '|startswith' in field:
+                base_field = field.split('|')[0]
+                if field_mapping and base_field in field_mapping:
+                    mapped_base = field_mapping[base_field]
+                else:
+                    mapped_base = base_field
+                return mapped_base, "startswith"
+            elif '|endswith' in field:
+                base_field = field.split('|')[0]
+                if field_mapping and base_field in field_mapping:
+                    mapped_base = field_mapping[base_field]
+                else:
+                    mapped_base = base_field
+                return mapped_base, "endswith"
+            else:
+                return mapped_field, "equals"
+        
+        # Helper function to create a Splunk search term based on field and value
+        def create_search_term(field, value, modifier):
+            if modifier == "contains":
+                if isinstance(value, str) and '*' in value:
+                    # Handle wildcards
+                    return f'{field}=*{value}*'
+                else:
+                    return f'{field}="*{value}*"'
+            elif modifier == "startswith":
+                return f'{field}="{value}*"'
+            elif modifier == "endswith":
+                return f'{field}="*{value}"'
+            else:  # equals
+                if isinstance(value, str) and ' ' in value:
+                    return f'{field}="{value}"'
+                else:
+                    return f'{field}={value}'
+        
         # Helper function to convert a condition to SPL
         def condition_to_spl(condition, searches):
             # Handle basic AND/OR logic
             condition = re.sub(r'\s+and\s+', ' AND ', condition, flags=re.IGNORECASE)
             condition = re.sub(r'\s+or\s+', ' OR ', condition, flags=re.IGNORECASE)
+            condition = re.sub(r'\s+not\s+', ' NOT ', condition, flags=re.IGNORECASE)
             
             # Replace search identifiers with their queries
             for search_id, search_query in searches.items():
                 if search_id in condition:
                     # Wrap in parentheses if it's a complex query
                     if ' AND ' in search_query or ' OR ' in search_query:
-                        condition = condition.replace(search_id, f"({search_query})")
+                        condition = re.sub(r'\b' + re.escape(search_id) + r'\b', f"({search_query})", condition)
                     else:
-                        condition = condition.replace(search_id, search_query)
+                        condition = re.sub(r'\b' + re.escape(search_id) + r'\b', search_query, condition)
             
             return condition
         
@@ -71,22 +117,26 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
                 query_parts = []
                 for field, field_value in value.items():
                     # Apply field mapping if available
-                    if field_mapping and field in field_mapping:
-                        mapped_field = field_mapping[field]
+                    if field_mapping and field.split('|')[0] in field_mapping:
+                        mapped_field = field_mapping[field.split('|')[0]]
                     else:
-                        mapped_field = field
+                        mapped_field = field.split('|')[0]
+                    
+                    # Process field modifiers (contains, startswith, etc.)
+                    mapped_field, modifier = process_field_with_modifiers(field, mapped_field)
                     
                     # Handle different value types
                     if isinstance(field_value, list):
-                        values = [f'"{v}"' if ' ' in str(v) else str(v) for v in field_value]
-                        value_str = " OR ".join([f"{mapped_field}={val}" for val in values])
-                        if len(values) > 1:
-                            value_str = f"({value_str})"
+                        values_parts = []
+                        for v in field_value:
+                            values_parts.append(create_search_term(mapped_field, v, modifier))
+                        if len(values_parts) > 1:
+                            value_str = "(" + " OR ".join(values_parts) + ")"
+                        else:
+                            value_str = values_parts[0]
                         query_parts.append(value_str)
                     else:
-                        if ' ' in str(field_value):
-                            field_value = f'"{field_value}"'
-                        query_parts.append(f"{mapped_field}={field_value}")
+                        query_parts.append(create_search_term(mapped_field, field_value, modifier))
                 
                 searches[key] = " AND ".join(query_parts)
         
@@ -98,13 +148,22 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
         # Convert the condition to SPL
         spl_query = condition_to_spl(condition, searches)
         
-        # Add search prefix
-        final_query = f"search {spl_query}"
+        # Build the final SPL query
+        query_parts = []
         
-        # Add index if specified
-        if 'logsource' in sigma_yaml and 'product' in sigma_yaml['logsource']:
-            product = sigma_yaml['logsource']['product']
-            final_query = f"index={product} {final_query}"
+        # Add index if specified in logsource
+        if 'logsource' in sigma_yaml:
+            logsource = sigma_yaml['logsource']
+            if 'product' in logsource:
+                query_parts.append(f"index={logsource['product']}")
+            if 'service' in logsource:
+                query_parts.append(f"sourcetype={logsource['service']}")
+        
+        # Add the main search condition
+        query_parts.append(spl_query)
+        
+        # Combine all parts into the final query
+        final_query = "search " + " ".join(query_parts)
         
         return final_query, None
     
