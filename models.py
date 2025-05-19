@@ -4,6 +4,7 @@ from app import db
 from sqlalchemy.types import JSON, Text
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+from sqlalchemy.orm import relationship
 
 class FieldMapping(db.Model):
     __tablename__ = 'field_mappings'
@@ -60,6 +61,54 @@ class SplunkSettings(db.Model):
         }
 
 
+class Hunt(db.Model):
+    """Model for a collection of queries executed as a hunt session"""
+    __tablename__ = 'hunts'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship with queries that belong to this hunt
+    queries = relationship("QueryHistory", back_populates="hunt")
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+            'query_count': len(self.queries)
+        }
+
+
+class SigmaRule(db.Model):
+    """Model for storing Sigma rules library"""
+    __tablename__ = 'sigma_rules'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(255), nullable=False)
+    rule_id = db.Column(db.String(255))
+    content = db.Column(Text, nullable=False)
+    category = db.Column(db.String(100))
+    product = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'rule_id': self.rule_id,
+            'content': self.content,
+            'category': self.category,
+            'product': self.product,
+            'created_at': self.created_at.isoformat()
+        }
+
+
 class QueryHistory(db.Model):
     __tablename__ = 'query_history'
     
@@ -72,6 +121,12 @@ class QueryHistory(db.Model):
     status = db.Column(db.String(50), default="Success")  # Success, Failed, etc.
     error_message = db.Column(db.Text)
     
+    # Foreign key to link to a hunt (nullable - can be a standalone query)
+    hunt_id = db.Column(db.Integer, db.ForeignKey('hunts.id'), nullable=True)
+    
+    # Relationship back to the hunt
+    hunt = relationship("Hunt", back_populates="queries")
+    
     def to_dict(self):
         return {
             'id': self.id,
@@ -81,5 +136,6 @@ class QueryHistory(db.Model):
             'time_range': self.time_range,
             'execution_time': self.execution_time.isoformat(),
             'status': self.status,
-            'error_message': self.error_message
+            'error_message': self.error_message,
+            'hunt_id': self.hunt_id
         }

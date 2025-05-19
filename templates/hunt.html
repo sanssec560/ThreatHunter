@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+
+{% block title %}Hunt Management{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">Threat Hunting Management</h1>
+    
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Create New Hunt</h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ url_for('hunt') }}" method="post">
+                        <input type="hidden" name="action" value="create_hunt">
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Hunt Name</label>
+                            <input type="text" class="form-control" id="name" name="name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="description" class="form-label">Description</label>
+                            <textarea class="form-control" id="description" name="description" rows="3"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Create Hunt</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Hunt Management Tips</h5>
+                </div>
+                <div class="card-body">
+                    <p>
+                        A hunt allows you to execute multiple Sigma rules against your Splunk instance and track the results together.
+                    </p>
+                    <ul>
+                        <li>Create a hunt with a descriptive name</li>
+                        <li>Add multiple Sigma rules to the hunt</li>
+                        <li>Execute the hunt with a specific time range</li>
+                        <li>View all results together</li>
+                    </ul>
+                    <a href="{{ url_for('rules') }}" class="btn btn-outline-secondary">Browse Sigma Rules</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">Existing Hunts</h5>
+        </div>
+        <div class="card-body">
+            {% if hunts %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Description</th>
+                            <th>Created</th>
+                            <th>Queries</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for hunt in hunts %}
+                        <tr>
+                            <td>{{ hunt.name }}</td>
+                            <td>{{ hunt.description or 'No description' }}</td>
+                            <td>{{ hunt.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>{{ hunt.queries|length }}</td>
+                            <td>
+                                <div class="btn-group">
+                                    <a href="{{ url_for('hunt_detail', hunt_id=hunt.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+                                    <form action="{{ url_for('hunt') }}" method="post" class="d-inline">
+                                        <input type="hidden" name="action" value="delete_hunt">
+                                        <input type="hidden" name="hunt_id" value="{{ hunt.id }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Are you sure you want to delete this hunt?')">Delete</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                No hunts created yet. Create your first hunt above.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

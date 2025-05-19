@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+
+{% block title %}Rule: {{ rule.title }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>{{ rule.title }}</h1>
+        <div>
+            <a href="{{ url_for('rules') }}" class="btn btn-outline-secondary">Back to Rules</a>
+        </div>
+    </div>
+    
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Rule Information</h5>
+                </div>
+                <div class="card-body">
+                    <p><strong>ID:</strong> {{ rule.rule_id or 'Not specified' }}</p>
+                    <p><strong>Category:</strong> 
+                        {% if rule.category %}
+                            <span class="badge bg-secondary">{{ rule.category }}</span>
+                        {% else %}
+                            <span class="text-muted">Not specified</span>
+                        {% endif %}
+                    </p>
+                    <p><strong>Product:</strong> 
+                        {% if rule.product %}
+                            <span class="badge bg-info">{{ rule.product }}</span>
+                        {% else %}
+                            <span class="text-muted">Not specified</span>
+                        {% endif %}
+                    </p>
+                    <p><strong>Added:</strong> {{ rule.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                </div>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Execute Rule</h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ url_for('execute_rule', rule_id=rule.id) }}" method="post">
+                        <div class="mb-3">
+                            <label for="time_range" class="form-label">Time Range</label>
+                            <select class="form-select" id="time_range" name="time_range">
+                                <option value="Last 30 days">Last 30 days</option>
+                                <option value="Last 7 days">Last 7 days</option>
+                                <option value="Last 24 hours">Last 24 hours</option>
+                                <option value="Last 1 year">Last 1 year</option>
+                                <option value="All time">All time</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Execute Rule</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Splunk Query (Preview)</h5>
+                </div>
+                <div class="card-body">
+                    {% if error %}
+                        <div class="alert alert-danger">
+                            <strong>Error converting rule:</strong> {{ error }}
+                        </div>
+                    {% elif splunk_query %}
+                        <pre class="bg-dark text-light p-3 rounded"><code>{{ splunk_query }}</code></pre>
+                    {% else %}
+                        <div class="alert alert-warning">
+                            Unable to preview Splunk query.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Sigma Rule Content</h5>
+        </div>
+        <div class="card-body">
+            <pre class="bg-dark text-light p-3 rounded"><code>{{ rule.content }}</code></pre>
+        </div>
+    </div>
+</div>
+{% endblock %}

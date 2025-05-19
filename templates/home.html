@@ -4,13 +4,41 @@
 <div class="card bg-dark mb-4">
     <div class="card-body text-center">
         <h1 class="card-title"><i class="fas fa-shield-alt"></i> Threat Hunting App</h1>
-        <p class="card-text">An application for converting Sigma rules to Splunk queries and executing them.</p>
+        <p class="card-text">Convert Sigma rules to Splunk queries, manage rule libraries, and execute automated hunts.</p>
+    </div>
+</div>
+
+<!-- Dashboard Stats -->
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card bg-dark text-center">
+            <div class="card-body">
+                <h2 class="display-4">{{ rule_count|default(0) }}</h2>
+                <p class="card-text">Sigma Rules</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card bg-dark text-center">
+            <div class="card-body">
+                <h2 class="display-4">{{ hunt_count|default(0) }}</h2>
+                <p class="card-text">Automated Hunts</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card bg-dark text-center">
+            <div class="card-body">
+                <h2 class="display-4">{{ query_count|default(0) }}</h2>
+                <p class="card-text">Queries Executed</p>
+            </div>
+        </div>
     </div>
 </div>
 
 <div class="row g-4">
     <!-- Run Query Card -->
-    <div class="col-md-6 col-lg-3">
+    <div class="col-md-6 col-lg-4">
         <div class="card h-100 bg-dark">
             <div class="card-body text-center">
                 <i class="fas fa-search fa-3x mb-3"></i>
@@ -21,8 +49,32 @@
         </div>
     </div>
     
+    <!-- Sigma Rules Card -->
+    <div class="col-md-6 col-lg-4">
+        <div class="card h-100 bg-dark">
+            <div class="card-body text-center">
+                <i class="fas fa-file-code fa-3x mb-3"></i>
+                <h5 class="card-title">Sigma Rules Library</h5>
+                <p class="card-text">Browse, import, and manage your Sigma rules collection.</p>
+                <a href="{{ url_for('rules') }}" class="btn btn-primary">Go to Rules Library</a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Automated Hunts Card -->
+    <div class="col-md-6 col-lg-4">
+        <div class="card h-100 bg-dark">
+            <div class="card-body text-center">
+                <i class="fas fa-project-diagram fa-3x mb-3"></i>
+                <h5 class="card-title">Automated Hunts</h5>
+                <p class="card-text">Create and manage multi-rule hunting sessions.</p>
+                <a href="{{ url_for('hunt') }}" class="btn btn-primary">Go to Hunts</a>
+            </div>
+        </div>
+    </div>
+    
     <!-- View Results Card -->
-    <div class="col-md-6 col-lg-3">
+    <div class="col-md-6 col-lg-4">
         <div class="card h-100 bg-dark">
             <div class="card-body text-center">
                 <i class="fas fa-history fa-3x mb-3"></i>
@@ -34,7 +86,7 @@
     </div>
     
     <!-- Field Mapping Card -->
-    <div class="col-md-6 col-lg-3">
+    <div class="col-md-6 col-lg-4">
         <div class="card h-100 bg-dark">
             <div class="card-body text-center">
                 <i class="fas fa-exchange-alt fa-3x mb-3"></i>
@@ -46,7 +98,7 @@
     </div>
     
     <!-- Settings Card -->
-    <div class="col-md-6 col-lg-3">
+    <div class="col-md-6 col-lg-4">
         <div class="card h-100 bg-dark">
             <div class="card-body text-center">
                 <i class="fas fa-cog fa-3x mb-3"></i>
@@ -68,9 +120,9 @@
                 <ol class="mb-0">
                     <li class="mb-2">Verify your <strong>Splunk connection settings</strong> in the Settings page.</li>
                     <li class="mb-2">Check your <strong>field mappings</strong> in the Field Mapping page.</li>
-                    <li class="mb-2">Go to the <strong>Run Query</strong> page to enter a Sigma rule.</li>
-                    <li class="mb-2">Convert the rule to a Splunk query and execute it.</li>
-                    <li>View your <strong>past queries and results</strong> in the Results page.</li>
+                    <li class="mb-2">Download or add <strong>Sigma rules</strong> to your library.</li>
+                    <li class="mb-2">Create an <strong>automated hunt</strong> to run multiple rules.</li>
+                    <li>View your <strong>hunt results</strong> and find security threats.</li>
                 </ol>
             </div>
         </div>

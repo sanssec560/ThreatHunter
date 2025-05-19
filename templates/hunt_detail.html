@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+
+{% block title %}Hunt: {{ hunt.name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Hunt: {{ hunt.name }}</h1>
+        <a href="{{ url_for('hunt') }}" class="btn btn-outline-secondary">Back to Hunts</a>
+    </div>
+    
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Hunt Details</h5>
+                </div>
+                <div class="card-body">
+                    <p><strong>Description:</strong> {{ hunt.description or 'No description provided' }}</p>
+                    <p><strong>Created:</strong> {{ hunt.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                    <p><strong>Last Updated:</strong> {{ hunt.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                    <p><strong>Total Queries:</strong> {{ queries|length }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Execute Hunt</h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ url_for('hunt_detail', hunt_id=hunt.id) }}" method="post">
+                        <input type="hidden" name="action" value="execute_hunt">
+                        <div class="mb-3">
+                            <label for="time_range" class="form-label">Time Range</label>
+                            <select class="form-select" id="time_range" name="time_range">
+                                <option value="Last 30 days">Last 30 days</option>
+                                <option value="Last 7 days">Last 7 days</option>
+                                <option value="Last 24 hours">Last 24 hours</option>
+                                <option value="Last 1 year">Last 1 year</option>
+                                <option value="All time">All time</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Select Sigma Rules to Execute</label>
+                            <div class="border p-3 rounded" style="max-height: 300px; overflow-y: auto;">
+                                {% if sigma_rules %}
+                                    {% for rule in sigma_rules %}
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="sigma_rules" value="{{ rule.content }}" id="rule_{{ rule.id }}">
+                                        <label class="form-check-label" for="rule_{{ rule.id }}">
+                                            {{ rule.title }}
+                                            {% if rule.category %}
+                                                <span class="badge bg-secondary">{{ rule.category }}</span>
+                                            {% endif %}
+                                        </label>
+                                    </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="alert alert-warning">
+                                        No Sigma rules available. 
+                                        <a href="{{ url_for('rules') }}">Add or download rules first</a>.
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% if sigma_rules %}
+                        <button type="submit" class="btn btn-primary">Execute Hunt</button>
+                        {% endif %}
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Hunt Results</h5>
+        </div>
+        <div class="card-body">
+            {% if queries %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Execution Time</th>
+                            <th>Sigma Rule</th>
+                            <th>Time Range</th>
+                            <th>Status</th>
+                            <th>Results</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for query in queries %}
+                        <tr>
+                            <td>{{ query.execution_time.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>
+                                {% if query.sigma_rule|length > 100 %}
+                                    {{ query.sigma_rule[:100] }}...
+                                {% else %}
+                                    {{ query.sigma_rule }}
+                                {% endif %}
+                            </td>
+                            <td>{{ query.time_range }}</td>
+                            <td>
+                                {% if query.status == 'Success' %}
+                                    <span class="badge bg-success">Success</span>
+                                {% else %}
+                                    <span class="badge bg-danger">Failed</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if query.results %}
+                                    {{ query.results|length }} events
+                                {% elif query.status == 'Failed' %}
+                                    Error
+                                {% else %}
+                                    0 events
+                                {% endif %}
+                            </td>
+                            <td>
+                                <a href="{{ url_for('view_result', query_id=query.id) }}" class="btn btn-sm btn-outline-primary">View Details</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                No queries have been executed for this hunt yet. Use the form above to execute.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

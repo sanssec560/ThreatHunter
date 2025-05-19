@@ -1,20 +1,49 @@
 import json
 import logging
+from datetime import datetime
 from flask import render_template, request, redirect, url_for, flash, jsonify, session
 from app import app, db
-from models import FieldMapping, SplunkSettings, QueryHistory
+from models import FieldMapping, SplunkSettings, QueryHistory, Hunt, SigmaRule
 from utils import (
     convert_sigma_to_spl,
     execute_splunk_query,
     test_splunk_connection,
     save_query_results,
-    suggest_field_mappings
+    suggest_field_mappings,
+    create_hunt,
+    execute_hunt,
+    save_sigma_rule,
+    download_sigma_rules
 )
 
 @app.route('/')
 def home():
     """Home page with navigation buttons"""
-    return render_template('home.html')
+    # Get counts for dashboard safely
+    query_count = 0
+    hunt_count = 0
+    rule_count = 0
+    
+    try:
+        # Try to get counts but handle missing tables gracefully
+        query_count = QueryHistory.query.count() 
+    except Exception as e:
+        logging.warning(f"Could not fetch query count: {str(e)}")
+        
+    try:
+        hunt_count = Hunt.query.count()
+    except Exception as e:
+        logging.warning(f"Could not fetch hunt count: {str(e)}")
+        
+    try:
+        rule_count = SigmaRule.query.count()
+    except Exception as e:
+        logging.warning(f"Could not fetch rule count: {str(e)}")
+    
+    return render_template('home.html', 
+                          query_count=query_count,
+                          hunt_count=hunt_count,
+                          rule_count=rule_count)
 
 @app.route('/query', methods=['GET', 'POST'])
 def query():
@@ -278,6 +307,273 @@ def test_connection():
 @app.errorhandler(404)
 def page_not_found(e):
     return render_template('base.html', error="Page not found"), 404
+
+@app.route('/hunt', methods=['GET', 'POST'])
+def hunt():
+    """Page to create and manage automated hunts"""
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'create_hunt':
+            # Create a new hunt
+            name = request.form.get('name')
+            description = request.form.get('description', '')
+            
+            if not name:
+                flash("Hunt name is required", "danger")
+                return redirect(url_for('hunt'))
+            
+            hunt_obj = create_hunt(name, description)
+            if hunt_obj:
+                flash(f"Hunt '{name}' created successfully", "success")
+                return redirect(url_for('hunt_detail', hunt_id=hunt_obj.id))
+            else:
+                flash("Failed to create hunt", "danger")
+                
+        elif action == 'delete_hunt':
+            # Delete a hunt
+            hunt_id = request.form.get('hunt_id')
+            if hunt_id:
+                try:
+                    hunt_obj = Hunt.query.get(hunt_id)
+                    if hunt_obj:
+                        db.session.delete(hunt_obj)
+                        db.session.commit()
+                        flash(f"Hunt '{hunt_obj.name}' deleted successfully", "success")
+                    else:
+                        flash("Hunt not found", "danger")
+                except Exception as e:
+                    db.session.rollback()
+                    flash(f"Error deleting hunt: {str(e)}", "danger")
+            
+    # Get all hunts for display
+    hunts = Hunt.query.order_by(Hunt.created_at.desc()).all()
+    
+    return render_template('hunt.html', hunts=hunts)
+
+
+@app.route('/hunt/<int:hunt_id>', methods=['GET', 'POST'])
+def hunt_detail(hunt_id):
+    """Page to view and execute a specific hunt"""
+    # Get the hunt
+    hunt_obj = Hunt.query.get_or_404(hunt_id)
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'execute_hunt':
+            # Get sigma rules and time range
+            sigma_rules = request.form.getlist('sigma_rules')
+            time_range = request.form.get('time_range', 'Last 30 days')
+            
+            if not sigma_rules:
+                flash("Please select at least one Sigma rule", "danger")
+                return redirect(url_for('hunt_detail', hunt_id=hunt_id))
+            
+            # Execute the hunt
+            results = execute_hunt(hunt_id, sigma_rules, time_range)
+            
+            # Redirect to the hunt detail page to see results
+            flash(f"Hunt execution completed with {len(results)} queries", "success")
+            return redirect(url_for('hunt_detail', hunt_id=hunt_id))
+            
+        elif action == 'add_rule':
+            # Add a rule to the hunt's execution list
+            rule_id = request.form.get('rule_id')
+            if rule_id:
+                # We don't actually need to save this association,
+                # as rules are selected at execution time
+                flash("Rule added to hunt execution list", "success")
+                
+    # Get the queries associated with this hunt
+    queries = QueryHistory.query.filter_by(hunt_id=hunt_id).order_by(QueryHistory.execution_time.desc()).all()
+    
+    # Get all sigma rules for selection
+    sigma_rules = SigmaRule.query.order_by(SigmaRule.title).all()
+    
+    return render_template(
+        'hunt_detail.html', 
+        hunt=hunt_obj, 
+        queries=queries, 
+        sigma_rules=sigma_rules
+    )
+
+
+@app.route('/rules', methods=['GET', 'POST'])
+def rules():
+    """Page to browse and manage Sigma rules"""
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'add_rule':
+            # Add a single rule
+            title = request.form.get('title')
+            content = request.form.get('content')
+            
+            if not title or not content:
+                flash("Title and content are required", "danger")
+            else:
+                rule = save_sigma_rule(title, content)
+                if rule:
+                    flash(f"Rule '{title}' added successfully", "success")
+                else:
+                    flash("Failed to add rule", "danger")
+                    
+        elif action == 'delete_rule':
+            # Delete a rule
+            rule_id = request.form.get('rule_id')
+            if rule_id:
+                try:
+                    rule = SigmaRule.query.get(rule_id)
+                    if rule:
+                        db.session.delete(rule)
+                        db.session.commit()
+                        flash(f"Rule '{rule.title}' deleted successfully", "success")
+                    else:
+                        flash("Rule not found", "danger")
+                except Exception as e:
+                    db.session.rollback()
+                    flash(f"Error deleting rule: {str(e)}", "danger")
+                    
+        elif action == 'download_rules':
+            # Download rules from SigmaHQ
+            success, message, count = download_sigma_rules()
+            if success:
+                flash(message, "success")
+            else:
+                flash(message, "danger")
+                
+        return redirect(url_for('rules'))
+    
+    # Get filters from query parameters
+    category = request.args.get('category')
+    product = request.args.get('product')
+    search = request.args.get('search')
+    
+    # Build the query
+    query = SigmaRule.query
+    
+    if category:
+        query = query.filter(SigmaRule.category == category)
+    if product:
+        query = query.filter(SigmaRule.product == product)
+    if search:
+        query = query.filter(SigmaRule.title.ilike(f"%{search}%"))
+    
+    # Get all sigma rules
+    sigma_rules = query.order_by(SigmaRule.title).all()
+    
+    # Get unique categories and products for filtering
+    categories = db.session.query(SigmaRule.category).distinct().all()
+    products = db.session.query(SigmaRule.product).distinct().all()
+    
+    return render_template(
+        'rules.html', 
+        sigma_rules=sigma_rules,
+        categories=[c[0] for c in categories if c[0]],
+        products=[p[0] for p in products if p[0]],
+        selected_category=category,
+        selected_product=product,
+        search=search
+    )
+
+
+@app.route('/rules/<int:rule_id>')
+def rule_detail(rule_id):
+    """Page to view a specific Sigma rule"""
+    rule = SigmaRule.query.get_or_404(rule_id)
+    
+    # Convert to SPL for preview
+    field_mapping = FieldMapping.get_latest_mapping()
+    mapping_data = field_mapping.mapping_data if field_mapping else None
+    splunk_query, error = convert_sigma_to_spl(rule.content, mapping_data)
+    
+    return render_template(
+        'rule_detail.html', 
+        rule=rule, 
+        splunk_query=splunk_query,
+        error=error
+    )
+
+
+@app.route('/rules/execute/<int:rule_id>', methods=['POST'])
+def execute_rule(rule_id):
+    """Execute a Sigma rule directly"""
+    rule = SigmaRule.query.get_or_404(rule_id)
+    time_range = request.form.get('time_range', 'Last 30 days')
+    
+    # Convert and execute
+    field_mapping = FieldMapping.get_latest_mapping()
+    mapping_data = field_mapping.mapping_data if field_mapping else None
+    
+    # Convert Sigma to SPL
+    splunk_query, error = convert_sigma_to_spl(rule.content, mapping_data)
+    
+    if error:
+        flash(f"Error converting rule: {error}", "danger")
+        return redirect(url_for('rule_detail', rule_id=rule_id))
+    
+    # Execute the query
+    results, error = execute_splunk_query(splunk_query, time_range)
+    
+    if error:
+        # Save the failed query
+        query_record = save_query_results(
+            sigma_rule=rule.content,
+            splunk_query=splunk_query,
+            results=None,
+            time_range=time_range,
+            status="Failed",
+            error_message=error
+        )
+        flash(f"Error executing query: {error}", "danger")
+    else:
+        # Save the successful query
+        query_record = save_query_results(
+            sigma_rule=rule.content,
+            splunk_query=splunk_query,
+            results=results,
+            time_range=time_range,
+            status="Success"
+        )
+        flash(f"Query executed successfully with {len(results) if results else 0} results", "success")
+    
+    if query_record:
+        return redirect(url_for('view_result', query_id=query_record.id))
+    else:
+        return redirect(url_for('rule_detail', rule_id=rule_id))
+
+
+@app.route('/rules/execute-multiple', methods=['POST'])
+def execute_multiple_rules():
+    """Execute multiple Sigma rules"""
+    rule_ids = request.form.getlist('rule_ids')
+    time_range = request.form.get('time_range', 'Last 30 days')
+    hunt_name = request.form.get('hunt_name', f"Hunt {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    
+    if not rule_ids:
+        flash("Please select at least one rule", "danger")
+        return redirect(url_for('rules'))
+    
+    # Create a new hunt
+    hunt_obj = create_hunt(hunt_name)
+    if not hunt_obj:
+        flash("Failed to create hunt", "danger")
+        return redirect(url_for('rules'))
+    
+    # Get the rules content
+    sigma_rules = []
+    for rule_id in rule_ids:
+        rule = SigmaRule.query.get(rule_id)
+        if rule:
+            sigma_rules.append(rule.content)
+    
+    # Execute the hunt
+    results = execute_hunt(hunt_obj.id, sigma_rules, time_range)
+    
+    flash(f"Executed {len(results)} rules as part of hunt '{hunt_name}'", "success")
+    return redirect(url_for('hunt_detail', hunt_id=hunt_obj.id))
+
 
 @app.errorhandler(500)
 def internal_server_error(e):

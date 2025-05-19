@@ -1,0 +1,275 @@
+{% extends 'base.html' %}
+
+{% block title %}Sigma Rules Library{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Sigma Rules Library</h1>
+        <div>
+            <a href="{{ url_for('hunt') }}" class="btn btn-outline-secondary me-2">Hunts</a>
+            <a href="{{ url_for('query') }}" class="btn btn-outline-secondary">Manual Query</a>
+        </div>
+    </div>
+    
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Rule Library Actions</h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ url_for('rules') }}" method="post">
+                        <input type="hidden" name="action" value="download_rules">
+                        <button type="submit" class="btn btn-primary mb-3 w-100">
+                            <i class="bi bi-cloud-download"></i> Download SigmaHQ Rules
+                        </button>
+                    </form>
+                    
+                    <button type="button" class="btn btn-outline-primary mb-3 w-100" data-bs-toggle="modal" data-bs-target="#addRuleModal">
+                        <i class="bi bi-plus-circle"></i> Add Custom Rule
+                    </button>
+                    
+                    <form action="{{ url_for('rules') }}" method="post" id="executeMultipleForm">
+                        <input type="hidden" name="action" value="execute_multiple">
+                        <button type="button" onclick="submitSelectedRules()" class="btn btn-success w-100">
+                            <i class="bi bi-play"></i> Execute Selected Rules
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Filter Rules</h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ url_for('rules') }}" method="get">
+                        <div class="mb-3">
+                            <label for="search" class="form-label">Search</label>
+                            <input type="text" class="form-control" id="search" name="search" value="{{ search or '' }}">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="category" class="form-label">Category</label>
+                            <select class="form-select" id="category" name="category">
+                                <option value="">All Categories</option>
+                                {% for category in categories %}
+                                <option value="{{ category }}" {% if selected_category == category %}selected{% endif %}>{{ category }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="product" class="form-label">Product</label>
+                            <select class="form-select" id="product" name="product">
+                                <option value="">All Products</option>
+                                {% for product in products %}
+                                <option value="{{ product }}" {% if selected_product == product %}selected{% endif %}>{{ product }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary w-100">Apply Filters</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-9">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Sigma Rules</h5>
+                    <span class="badge bg-info">{{ sigma_rules|length }} rules</span>
+                </div>
+                <div class="card-body">
+                    {% if sigma_rules %}
+                    <div class="table-responsive">
+                        <table class="table table-hover rule-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px;">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                                        </div>
+                                    </th>
+                                    <th>Title</th>
+                                    <th>Category</th>
+                                    <th>Product</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for rule in sigma_rules %}
+                                <tr data-rule-id="{{ rule.id }}">
+                                    <td>
+                                        <div class="form-check">
+                                            <input class="form-check-input rule-checkbox" type="checkbox" value="{{ rule.id }}" id="rule_check_{{ rule.id }}">
+                                        </div>
+                                    </td>
+                                    <td>{{ rule.title }}</td>
+                                    <td>
+                                        {% if rule.category %}
+                                        <span class="badge bg-secondary">{{ rule.category }}</span>
+                                        {% else %}
+                                        <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if rule.product %}
+                                        <span class="badge bg-info">{{ rule.product }}</span>
+                                        {% else %}
+                                        <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="btn-group">
+                                            <a href="{{ url_for('rule_detail', rule_id=rule.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+                                            <button type="button" class="btn btn-sm btn-outline-success" onclick="executeRule('{{ rule.id }}')">Execute</button>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteRule('{{ rule.id }}', '{{ rule.title }}')">Delete</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-info">
+                        No Sigma rules found. Use the "Download SigmaHQ Rules" button to populate your library, or add custom rules.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Rule Modal -->
+<div class="modal fade" id="addRuleModal" tabindex="-1" aria-labelledby="addRuleModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addRuleModalLabel">Add Custom Sigma Rule</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form action="{{ url_for('rules') }}" method="post" id="addRuleForm">
+                    <input type="hidden" name="action" value="add_rule">
+                    <div class="mb-3">
+                        <label for="title" class="form-label">Rule Title</label>
+                        <input type="text" class="form-control" id="title" name="title" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="content" class="form-label">Rule Content (YAML)</label>
+                        <textarea class="form-control" id="content" name="content" rows="15" required></textarea>
+                        <div class="form-text">Enter the complete Sigma rule in YAML format.</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" form="addRuleForm" class="btn btn-primary">Add Rule</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Execute Multiple Rules Modal -->
+<div class="modal fade" id="executeMultipleModal" tabindex="-1" aria-labelledby="executeMultipleModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="executeMultipleModalLabel">Execute Selected Rules</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form action="{{ url_for('execute_multiple_rules') }}" method="post" id="executeMultipleRulesForm">
+                    <div id="selectedRulesList"></div>
+                    <div class="mb-3">
+                        <label for="hunt_name" class="form-label">Hunt Name</label>
+                        <input type="text" class="form-control" id="hunt_name" name="hunt_name" value="Hunt {{ now.strftime('%Y-%m-%d %H:%M') }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="time_range_multiple" class="form-label">Time Range</label>
+                        <select class="form-select" id="time_range_multiple" name="time_range">
+                            <option value="Last 30 days">Last 30 days</option>
+                            <option value="Last 7 days">Last 7 days</option>
+                            <option value="Last 24 hours">Last 24 hours</option>
+                            <option value="Last 1 year">Last 1 year</option>
+                            <option value="All time">All time</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" form="executeMultipleRulesForm" class="btn btn-primary">Execute Rules</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Rule Form (hidden) -->
+<form action="{{ url_for('rules') }}" method="post" id="deleteRuleForm" style="display: none;">
+    <input type="hidden" name="action" value="delete_rule">
+    <input type="hidden" name="rule_id" id="delete_rule_id">
+</form>
+
+<!-- Execute Single Rule Form (hidden) -->
+<form action="{{ url_for('execute_rule', rule_id=0) }}" method="post" id="executeRuleForm" style="display: none;">
+    <input type="hidden" name="time_range" value="Last 30 days">
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleSelectAll() {
+    const selectAllCheckbox = document.getElementById('selectAll');
+    const ruleCheckboxes = document.querySelectorAll('.rule-checkbox');
+    
+    ruleCheckboxes.forEach(checkbox => {
+        checkbox.checked = selectAllCheckbox.checked;
+    });
+}
+
+function submitSelectedRules() {
+    const selectedCheckboxes = document.querySelectorAll('.rule-checkbox:checked');
+    
+    if (selectedCheckboxes.length === 0) {
+        alert('Please select at least one rule to execute.');
+        return;
+    }
+    
+    // Populate the hidden form with selected rule IDs
+    const selectedRulesList = document.getElementById('selectedRulesList');
+    selectedRulesList.innerHTML = '';
+    
+    selectedCheckboxes.forEach(checkbox => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'rule_ids';
+        input.value = checkbox.value;
+        selectedRulesList.appendChild(input);
+    });
+    
+    // Show the execution modal
+    const modal = new bootstrap.Modal(document.getElementById('executeMultipleModal'));
+    modal.show();
+}
+
+function deleteRule(ruleId, ruleTitle) {
+    if (confirm(`Are you sure you want to delete the rule "${ruleTitle}"?`)) {
+        document.getElementById('delete_rule_id').value = ruleId;
+        document.getElementById('deleteRuleForm').submit();
+    }
+}
+
+function executeRule(ruleId) {
+    const form = document.getElementById('executeRuleForm');
+    form.action = form.action.replace('/0', '/' + ruleId);
+    form.submit();
+}
+</script>
+{% endblock %}
