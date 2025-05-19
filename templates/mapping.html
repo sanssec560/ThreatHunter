@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card bg-dark mb-4">
+    <div class="card-header">
+        <h2><i class="fas fa-exchange-alt"></i> Field Mapping</h2>
+    </div>
+    <div class="card-body">
+        <p class="text-light">
+            Field mappings are used to convert fields in Sigma rules to their corresponding fields in Splunk.
+            For example, map <code>user.name</code> in Sigma to <code>user</code> in Splunk.
+        </p>
+        
+        {% if error %}
+        <div class="alert alert-danger">
+            <i class="fas fa-exclamation-triangle"></i> {{ error }}
+        </div>
+        {% endif %}
+        
+        {% if success %}
+        <div class="alert alert-success">
+            <i class="fas fa-check-circle"></i> {{ success }}
+        </div>
+        {% endif %}
+        
+        <form method="POST" action="{{ url_for('mapping') }}" id="mapping-form">
+            <div class="card bg-dark">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="fas fa-map"></i> Field Mappings</h5>
+                        <button type="button" id="add-mapping" class="btn btn-sm btn-success">
+                            <i class="fas fa-plus"></i> Add Mapping
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Sigma Field</th>
+                                    <th>Splunk Field</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mapping-table-body">
+                                {% if field_mapping and field_mapping.mapping_data %}
+                                    {% for sigma_field, splunk_field in field_mapping.mapping_data.items() %}
+                                    <tr class="mapping-row">
+                                        <td>
+                                            <input type="text" class="form-control" name="sigma_field_{{ loop.index0 }}" value="{{ sigma_field }}" required>
+                                        </td>
+                                        <td>
+                                            <input type="text" class="form-control" name="splunk_field_{{ loop.index0 }}" value="{{ splunk_field }}" required>
+                                        </td>
+                                        <td>
+                                            <button type="button" class="btn btn-sm btn-danger remove-mapping">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                <tr class="mapping-row">
+                                    <td>
+                                        <input type="text" class="form-control" name="sigma_field_0" placeholder="e.g., user.name" required>
+                                    </td>
+                                    <td>
+                                        <input type="text" class="form-control" name="splunk_field_0" placeholder="e.g., user" required>
+                                    </td>
+                                    <td>
+                                        <button type="button" class="btn btn-sm btn-danger remove-mapping">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Save Mappings
+                    </button>
+                </div>
+            </div>
+        </form>
+        
+        <div class="card bg-dark mt-4">
+            <div class="card-header">
+                <h5><i class="fas fa-info-circle"></i> Mapping Guidelines</h5>
+            </div>
+            <div class="card-body">
+                <ul class="mb-0">
+                    <li>Map fields from Sigma format (e.g., <code>process.name</code>) to Splunk format (e.g., <code>proc</code>).</li>
+                    <li>For nested fields, use dot notation in Sigma (e.g., <code>user.domain</code>).</li>
+                    <li>Mappings are used when converting Sigma rules to SPL queries.</li>
+                    <li>The application will suggest mappings for unmapped fields when running queries.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const mappingTableBody = document.getElementById('mapping-table-body');
+        const addMappingButton = document.getElementById('add-mapping');
+        
+        // Add new mapping row
+        addMappingButton.addEventListener('click', function() {
+            const rows = document.querySelectorAll('.mapping-row');
+            const newIndex = rows.length;
+            
+            const newRow = document.createElement('tr');
+            newRow.className = 'mapping-row';
+            newRow.innerHTML = `
+                <td>
+                    <input type="text" class="form-control" name="sigma_field_${newIndex}" placeholder="e.g., user.name" required>
+                </td>
+                <td>
+                    <input type="text" class="form-control" name="splunk_field_${newIndex}" placeholder="e.g., user" required>
+                </td>
+                <td>
+                    <button type="button" class="btn btn-sm btn-danger remove-mapping">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            
+            mappingTableBody.appendChild(newRow);
+            
+            // Add event listener to the new remove button
+            const removeButton = newRow.querySelector('.remove-mapping');
+            removeButton.addEventListener('click', function() {
+                if (document.querySelectorAll('.mapping-row').length > 1) {
+                    newRow.remove();
+                } else {
+                    alert('You must have at least one field mapping.');
+                }
+            });
+        });
+        
+        // Add event listeners to existing remove buttons
+        document.querySelectorAll('.remove-mapping').forEach(button => {
+            button.addEventListener('click', function() {
+                if (document.querySelectorAll('.mapping-row').length > 1) {
+                    this.closest('.mapping-row').remove();
+                } else {
+                    alert('You must have at least one field mapping.');
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

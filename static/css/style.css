@@ -1,0 +1,132 @@
+/* Custom styles for Threat Hunting App */
+
+/* Improve spacing */
+body {
+    padding-bottom: 60px;
+}
+
+.footer {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    height: 60px;
+    line-height: 60px;
+    z-index: 1000;
+}
+
+/* Code blocks in tables */
+pre {
+    margin-bottom: 0;
+    white-space: pre-wrap;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+/* Improve alerts */
+.alert-dismissible {
+    padding-right: 3rem;
+}
+
+/* Custom styles for textareas */
+textarea {
+    min-height: 100px;
+    font-family: monospace;
+    resize: vertical;
+}
+
+/* Card styles */
+.card {
+    margin-bottom: 1.5rem;
+    border: none;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.card-header {
+    background-color: rgba(33, 37, 41, 0.8);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Table improvements */
+.table-responsive {
+    margin-bottom: 1rem;
+}
+
+.table-dark {
+    --bs-table-color: #e9ecef;
+    --bs-table-bg: #343a40;
+    --bs-table-border-color: #495057;
+}
+
+.table-dark th,
+.table-dark td {
+    vertical-align: middle;
+}
+
+/* Pagination styling */
+.pagination {
+    margin-bottom: 0;
+}
+
+/* Button hover effects */
+.btn {
+    transition: all 0.2s ease;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Icon spacing */
+.fas, .far, .fab {
+    margin-right: 0.25rem;
+}
+
+/* Badge styling */
+.badge {
+    font-weight: normal;
+    padding: 0.4em 0.6em;
+}
+
+/* Form control focus */
+.form-control:focus {
+    box-shadow: 0 0 0 0.25rem rgba(49, 132, 253, 0.25);
+}
+
+/* Navbar styling */
+.navbar {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.15);
+}
+
+/* Test connection button in navbar */
+#test-connection-btn {
+    margin-left: 1rem;
+}
+
+/* Custom scrollbar for textareas and pre elements */
+textarea::-webkit-scrollbar,
+pre::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+textarea::-webkit-scrollbar-track,
+pre::-webkit-scrollbar-track {
+    background: #343a40;
+}
+
+textarea::-webkit-scrollbar-thumb,
+pre::-webkit-scrollbar-thumb {
+    background-color: #6c757d;
+    border-radius: 4px;
+}
+
+/* Improve form elements spacing */
+.form-label {
+    margin-bottom: 0.3rem;
+    font-weight: 500;
+}
+
+.form-text {
+    color: #adb5bd;
+}

@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card bg-dark mb-4">
+    <div class="card-header">
+        <h2><i class="fas fa-cog"></i> Splunk Connection Settings</h2>
+    </div>
+    <div class="card-body">
+        {% if error %}
+        <div class="alert alert-danger">
+            <i class="fas fa-exclamation-triangle"></i> {{ error }}
+        </div>
+        {% endif %}
+        
+        {% if success %}
+        <div class="alert alert-success">
+            <i class="fas fa-check-circle"></i> {{ success }}
+        </div>
+        {% endif %}
+        
+        <form method="POST" action="{{ url_for('settings') }}" id="settings-form">
+            <div class="mb-3">
+                <label for="host" class="form-label">Splunk Host</label>
+                <input type="text" class="form-control" id="host" name="host" placeholder="e.g., 192.168.128.224" value="{{ splunk_settings.host }}" required>
+                <div class="form-text">The IP address or hostname of your Splunk server.</div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="port" class="form-label">Splunk Port</label>
+                <input type="number" class="form-control" id="port" name="port" placeholder="e.g., 8089" value="{{ splunk_settings.port }}" required>
+                <div class="form-text">The port for Splunk REST API (default is 8089).</div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="username" class="form-label">Username</label>
+                <input type="text" class="form-control" id="username" name="username" placeholder="e.g., admin" value="{{ splunk_settings.username }}" required>
+                <div class="form-text">Username for Splunk authentication.</div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="password" class="form-label">Password</label>
+                <input type="password" class="form-control" id="password" name="password" placeholder="Enter password">
+                <div class="form-text">
+                    Password for Splunk authentication.
+                    {% if splunk_settings.id %}
+                    Leave blank to keep the current password.
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="d-grid gap-2 d-md-flex">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Save Settings
+                </button>
+                <button type="button" id="test-settings-btn" class="btn btn-info">
+                    <i class="fas fa-plug"></i> Test Connection
+                </button>
+            </div>
+        </form>
+        
+        <div id="connection-result" class="alert mt-3 d-none">
+            <!-- Test connection results will be shown here -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const testSettingsBtn = document.getElementById('test-settings-btn');
+        const connectionResult = document.getElementById('connection-result');
+        const settingsForm = document.getElementById('settings-form');
+        
+        // Test connection with current form values
+        testSettingsBtn.addEventListener('click', function() {
+            // Show loading state
+            testSettingsBtn.disabled = true;
+            testSettingsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+            connectionResult.className = 'alert mt-3 d-none';
+            
+            // Get form data
+            const formData = new FormData(settingsForm);
+            
+            // Send test connection request
+            fetch('/test-connection', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Show result
+                if (data.success) {
+                    connectionResult.className = 'alert alert-success mt-3';
+                    connectionResult.innerHTML = '<i class="fas fa-check-circle"></i> ' + data.message;
+                } else {
+                    connectionResult.className = 'alert alert-danger mt-3';
+                    connectionResult.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' + data.message;
+                }
+                
+                // Reset button state
+                testSettingsBtn.disabled = false;
+                testSettingsBtn.innerHTML = '<i class="fas fa-plug"></i> Test Connection';
+            })
+            .catch(error => {
+                // Show error
+                connectionResult.className = 'alert alert-danger mt-3';
+                connectionResult.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Error testing connection: ' + error.message;
+                
+                // Reset button state
+                testSettingsBtn.disabled = false;
+                testSettingsBtn.innerHTML = '<i class="fas fa-plug"></i> Test Connection';
+            });
+        });
+    });
+</script>
+{% endblock %}

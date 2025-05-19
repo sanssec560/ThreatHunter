@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card bg-dark mb-4">
+    <div class="card-body text-center">
+        <h1 class="card-title"><i class="fas fa-shield-alt"></i> Threat Hunting App</h1>
+        <p class="card-text">An application for converting Sigma rules to Splunk queries and executing them.</p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Run Query Card -->
+    <div class="col-md-6 col-lg-3">
+        <div class="card h-100 bg-dark">
+            <div class="card-body text-center">
+                <i class="fas fa-search fa-3x mb-3"></i>
+                <h5 class="card-title">Run Query</h5>
+                <p class="card-text">Convert Sigma rules to SPL and execute them against Splunk.</p>
+                <a href="{{ url_for('query') }}" class="btn btn-primary">Go to Run Query</a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- View Results Card -->
+    <div class="col-md-6 col-lg-3">
+        <div class="card h-100 bg-dark">
+            <div class="card-body text-center">
+                <i class="fas fa-history fa-3x mb-3"></i>
+                <h5 class="card-title">View Results</h5>
+                <p class="card-text">Browse previous query executions and their results.</p>
+                <a href="{{ url_for('results') }}" class="btn btn-primary">Go to Results</a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Field Mapping Card -->
+    <div class="col-md-6 col-lg-3">
+        <div class="card h-100 bg-dark">
+            <div class="card-body text-center">
+                <i class="fas fa-exchange-alt fa-3x mb-3"></i>
+                <h5 class="card-title">Field Mapping</h5>
+                <p class="card-text">Configure field mappings between Sigma and Splunk formats.</p>
+                <a href="{{ url_for('mapping') }}" class="btn btn-primary">Go to Field Mapping</a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Card -->
+    <div class="col-md-6 col-lg-3">
+        <div class="card h-100 bg-dark">
+            <div class="card-body text-center">
+                <i class="fas fa-cog fa-3x mb-3"></i>
+                <h5 class="card-title">Settings</h5>
+                <p class="card-text">Configure Splunk connection settings for the application.</p>
+                <a href="{{ url_for('settings') }}" class="btn btn-primary">Go to Settings</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-8 mx-auto">
+        <div class="card bg-dark">
+            <div class="card-header">
+                <h5><i class="fas fa-info-circle"></i> Getting Started</h5>
+            </div>
+            <div class="card-body">
+                <ol class="mb-0">
+                    <li class="mb-2">Verify your <strong>Splunk connection settings</strong> in the Settings page.</li>
+                    <li class="mb-2">Check your <strong>field mappings</strong> in the Field Mapping page.</li>
+                    <li class="mb-2">Go to the <strong>Run Query</strong> page to enter a Sigma rule.</li>
+                    <li class="mb-2">Convert the rule to a Splunk query and execute it.</li>
+                    <li>View your <strong>past queries and results</strong> in the Results page.</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
