@@ -16,7 +16,7 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 def convert_sigma_to_spl(sigma_rule, field_mapping=None):
     """
     Convert a Sigma rule to Splunk SPL query
-    This implementation handles complex Sigma rules with nested conditions
+    This implementation targets exact Splunk syntax for complex rules
     
     Args:
         sigma_rule (str): The Sigma rule content
@@ -38,6 +38,21 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
         if not sigma_yaml:
             return None, "Empty or invalid Sigma rule"
         
+        # Field mapping for common Windows event fields
+        windows_field_mapping = {
+            'Image': 'NewProcessName',
+            'ParentImage': 'ParentProcessName',
+            'CommandLine': 'CommandLine',
+            'User': 'User',
+            'IntegrityLevel': 'IntegrityLevel'
+        }
+        
+        # Combine with user-provided field mapping
+        if field_mapping:
+            combined_mapping = {**windows_field_mapping, **field_mapping}
+        else:
+            combined_mapping = windows_field_mapping
+            
         # Extract fields from the detection section
         detection = sigma_yaml.get('detection', {})
         if not detection:
@@ -48,26 +63,29 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
             # Handle common Sigma field modifiers
             if '|contains' in field:
                 base_field = field.split('|')[0]
-                if field_mapping and base_field in field_mapping:
-                    mapped_base = field_mapping[base_field]
+                if combined_mapping and base_field in combined_mapping:
+                    mapped_base = combined_mapping[base_field]
                 else:
                     mapped_base = base_field
                 return mapped_base, "contains"
             elif '|startswith' in field:
                 base_field = field.split('|')[0]
-                if field_mapping and base_field in field_mapping:
-                    mapped_base = field_mapping[base_field]
+                if combined_mapping and base_field in combined_mapping:
+                    mapped_base = combined_mapping[base_field]
                 else:
                     mapped_base = base_field
                 return mapped_base, "startswith"
             elif '|endswith' in field:
                 base_field = field.split('|')[0]
-                if field_mapping and base_field in field_mapping:
-                    mapped_base = field_mapping[base_field]
+                if combined_mapping and base_field in combined_mapping:
+                    mapped_base = combined_mapping[base_field]
                 else:
                     mapped_base = base_field
                 return mapped_base, "endswith"
             else:
+                # Check if base field needs mapping
+                if combined_mapping and field in combined_mapping:
+                    mapped_field = combined_mapping[field]
                 return mapped_field, "equals"
         
         # Helper function to create a Splunk search term based on field and value
@@ -75,38 +93,31 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
             if modifier == "contains":
                 if isinstance(value, str) and '*' in value:
                     # Handle wildcards
-                    return f'{field}=*{value}*'
+                    return f'{field}="*{value}*"'
                 else:
                     return f'{field}="*{value}*"'
             elif modifier == "startswith":
-                return f'{field}="{value}*"'
-            elif modifier == "endswith":
                 return f'{field}="*{value}"'
+            elif modifier == "endswith":
+                return f'{field}="{value}*"'
             else:  # equals
-                if isinstance(value, str) and ' ' in value:
+                if isinstance(value, str):
                     return f'{field}="{value}"'
                 else:
-                    return f'{field}={value}'
+                    return f'{field}="{value}"'
         
-        # Process each search pattern to handle nested structures
-        searches = {}
+        # Process selection blocks
+        selections = {}
         for key, value in detection.items():
             if key == 'condition':
                 continue
             
-            # Handle different types of detection items
+            # Standard field-value pairs dictionary
             if isinstance(value, dict):
-                # Standard field-value pairs
                 query_parts = []
                 for field, field_value in value.items():
-                    # Apply field mapping if available
-                    if field_mapping and field.split('|')[0] in field_mapping:
-                        mapped_field = field_mapping[field.split('|')[0]]
-                    else:
-                        mapped_field = field.split('|')[0]
-                    
-                    # Process field modifiers (contains, startswith, etc.)
-                    mapped_field, modifier = process_field_with_modifiers(field, mapped_field)
+                    # Map field name
+                    mapped_field, modifier = process_field_with_modifiers(field, field)
                     
                     # Handle different value types
                     if isinstance(field_value, list):
@@ -121,121 +132,94 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
                     else:
                         query_parts.append(create_search_term(mapped_field, field_value, modifier))
                 
-                searches[key] = " AND ".join(query_parts)
+                selections[key] = " AND ".join(query_parts)
             
+            # Handle list of dictionaries (selection_special type entries)
             elif isinstance(value, list):
-                # For lists of dicts, handle each entry as a separate condition group
-                list_parts = []
+                all_condition_parts = []
                 
                 for item in value:
                     if isinstance(item, dict):
-                        item_parts = []
-                        for sub_field, sub_value in item.items():
-                            # Apply field mapping
-                            if field_mapping and sub_field.split('|')[0] in field_mapping:
-                                mapped_sub_field = field_mapping[sub_field.split('|')[0]]
-                            else:
-                                mapped_sub_field = sub_field.split('|')[0]
+                        field_conditions = []
+                        for field, field_value in item.items():
+                            # Map the field
+                            mapped_field, modifier = process_field_with_modifiers(field, field)
                             
-                            # Process field modifiers
-                            mapped_sub_field, sub_modifier = process_field_with_modifiers(sub_field, mapped_sub_field)
-                            
-                            # Handle different value types
-                            if isinstance(sub_value, list):
-                                sub_values_parts = []
-                                for v in sub_value:
-                                    sub_values_parts.append(create_search_term(mapped_sub_field, v, sub_modifier))
-                                if len(sub_values_parts) > 1:
-                                    sub_value_str = "(" + " OR ".join(sub_values_parts) + ")"
-                                else:
-                                    sub_value_str = sub_values_parts[0]
-                                item_parts.append(sub_value_str)
+                            # Process values
+                            if isinstance(field_value, list):
+                                value_parts = []
+                                for v in field_value:
+                                    value_parts.append(create_search_term(mapped_field, v, modifier))
+                                if value_parts:
+                                    if len(value_parts) > 1:
+                                        field_conditions.append("(" + " OR ".join(value_parts) + ")")
+                                    else:
+                                        field_conditions.append(value_parts[0])
                             else:
-                                item_parts.append(create_search_term(mapped_sub_field, sub_value, sub_modifier))
+                                field_conditions.append(create_search_term(mapped_field, field_value, modifier))
                         
-                        if item_parts:
-                            list_parts.append("(" + " AND ".join(item_parts) + ")")
+                        if field_conditions:
+                            # Join multiple field conditions within one dict as OR
+                            all_condition_parts.append("(" + " OR ".join(field_conditions) + ")")
                 
-                if list_parts:
-                    searches[key] = " OR ".join(list_parts)
+                if all_condition_parts:
+                    # Join different dicts as OR per the Sigma spec
+                    selections[key] = "(" + " OR ".join(all_condition_parts) + ")"
         
-        # Helper function to convert condition to SPL with support for complex conditions
-        def parse_condition(condition, searches):
-            # Preprocess the condition - standardize syntax
-            condition = re.sub(r'\s+and\s+', ' AND ', condition, flags=re.IGNORECASE)
-            condition = re.sub(r'\s+or\s+', ' OR ', condition, flags=re.IGNORECASE)
-            condition = re.sub(r'\s+not\s+', ' NOT ', condition, flags=re.IGNORECASE)
-            condition = re.sub(r'all\s+of\s+([a-zA-Z0-9_*]+)', r'\1', condition, flags=re.IGNORECASE)
-            condition = re.sub(r'1\s+of\s+([a-zA-Z0-9_*]+)', r'\1', condition, flags=re.IGNORECASE)
-            
-            # Handle special syntax like "all of selection*"
-            if "all of" in condition.lower() and "*" in condition:
-                pattern = re.compile(r'all\s+of\s+([a-zA-Z0-9_]+)\*', re.IGNORECASE)
-                match = pattern.search(condition)
-                if match:
-                    prefix = match.group(1)
-                    wildcard_keys = [k for k in searches.keys() if k.startswith(prefix)]
-                    if wildcard_keys:
-                        replacement = "(" + " AND ".join([f"({searches[k]})" for k in wildcard_keys]) + ")"
-                        condition = pattern.sub(replacement, condition)
-            
-            # Handle "1 of them" condition
-            if "1 of them" in condition.lower():
-                # Replace with OR of all search terms
-                search_terms = []
-                for search_id, search_query in searches.items():
-                    search_terms.append(f"({search_query})")
-                if search_terms:
-                    condition = "(" + " OR ".join(search_terms) + ")"
-            
-            # Process remaining references to search terms
-            for search_id, search_query in searches.items():
-                if search_id in condition:
-                    # Use word boundary to prevent partial matches
-                    pattern = r'\b' + re.escape(search_id) + r'\b'
-                    # Wrap in parentheses if it's a complex query
-                    if ' AND ' in search_query or ' OR ' in search_query:
-                        replacement = f"({search_query})"
-                    else:
-                        replacement = search_query
-                    condition = re.sub(pattern, replacement, condition)
-            
-            return condition
-        
-        # Get and process the condition
+        # Process the condition
         condition = detection.get('condition', '')
         if not condition:
             return None, "No condition found in detection section"
         
-        # Convert the condition to SPL
-        spl_query = parse_condition(condition, searches)
+        # Replace condition syntax
+        splunk_condition = condition.lower()
         
-        # Build the final SPL query
-        query_parts = []
+        # Handle the "all of X*" syntax
+        if "all of" in splunk_condition and "*" in splunk_condition:
+            for prefix in [key.split('_')[0] for key in selections.keys() if '_' in key]:
+                pattern = f"all of {prefix}*"
+                if pattern in splunk_condition:
+                    # Find all keys that match the prefix
+                    matching_keys = [k for k in selections.keys() if k.startswith(prefix)]
+                    if matching_keys:
+                        combined = "(" + " AND ".join([f"({selections[k]})" for k in matching_keys]) + ")"
+                        splunk_condition = splunk_condition.replace(pattern, combined)
         
-        # Add source information from logsource
+        # Replace selection references with their actual queries
+        for key, query in selections.items():
+            if key in splunk_condition:
+                # Wrap complex queries in parentheses
+                if ' AND ' in query or ' OR ' in query:
+                    splunk_condition = splunk_condition.replace(key, f"({query})")
+                else:
+                    splunk_condition = splunk_condition.replace(key, query)
+        
+        # Standard condition replacements
+        splunk_condition = splunk_condition.replace(" and ", " AND ")
+        splunk_condition = splunk_condition.replace(" or ", " OR ")
+        splunk_condition = splunk_condition.replace(" not ", " NOT ")
+        
+        # Build the complete query
         if 'logsource' in sigma_yaml:
             logsource = sigma_yaml['logsource']
-            index_added = False
-            
-            # Process logosurce information
-            if 'product' in logsource:
-                query_parts.append(f"index={logsource['product']}")
-                index_added = True
-            
-            if 'service' in logsource:
-                query_parts.append(f"sourcetype={logsource['service']}")
-            
             if 'category' in logsource and logsource['category'] == 'process_creation':
-                if not index_added:
-                    query_parts.append("index=windows")
-                query_parts.append("EventCode=4688")
-            
-        # Add the main search condition
-        query_parts.append(spl_query)
+                # Standard process creation format
+                if 'product' in logsource and logsource['product'] == 'windows':
+                    # Specific format for Windows process creation
+                    base_query = 'index=* source="WinEventLog:Security" AND EventCode=4688 AND '
+                else:
+                    base_query = 'index=* EventCode=4688 AND '
+            else:
+                # Default format
+                if 'product' in logsource:
+                    base_query = f'index={logsource["product"]} AND '
+                else:
+                    base_query = 'index=* AND '
+        else:
+            base_query = 'index=* AND '
         
-        # Combine all parts into the final query
-        final_query = "search " + " ".join(query_parts)
+        # Combine everything
+        final_query = base_query + splunk_condition
         
         return final_query, None
     
