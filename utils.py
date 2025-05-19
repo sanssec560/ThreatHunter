@@ -15,7 +15,8 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 def convert_sigma_to_spl(sigma_rule, field_mapping=None):
     """
-    Convert a Sigma rule to Splunk SPL query using sigmac
+    Convert a Sigma rule to Splunk SPL query
+    Since we don't have sigmac available, this is a simplified version that does basic conversion
     
     Args:
         sigma_rule (str): The Sigma rule content
@@ -25,39 +26,87 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
         tuple: (spl_query, error_message)
     """
     try:
-        # Create a temporary file for the Sigma rule
-        with tempfile.NamedTemporaryFile(mode='w+', suffix='.yml', delete=False) as temp_sigma:
-            temp_sigma.write(sigma_rule)
-            temp_sigma_path = temp_sigma.name
+        import yaml
+        import re
         
-        # Create a temporary file for field mappings if provided
-        temp_config_path = None
-        if field_mapping:
-            with tempfile.NamedTemporaryFile(mode='w+', suffix='.yml', delete=False) as temp_config:
-                yaml_content = "fieldmappings:\n"
-                for sigma_field, splunk_field in field_mapping.items():
-                    yaml_content += f"  {sigma_field}: {splunk_field}\n"
-                temp_config.write(yaml_content)
-                temp_config_path = temp_config.name
+        # Parse the sigma rule
+        try:
+            sigma_yaml = yaml.safe_load(sigma_rule)
+        except yaml.YAMLError as e:
+            return None, f"Invalid YAML format: {str(e)}"
         
-        # Build the sigmac command
-        command = ["sigmac", "-t", "splunk", temp_sigma_path]
-        if temp_config_path:
-            command.extend(["-c", temp_config_path])
+        if not sigma_yaml:
+            return None, "Empty or invalid Sigma rule"
         
-        # Execute sigmac
-        result = subprocess.run(command, capture_output=True, text=True)
+        # Extract fields from the detection section
+        detection = sigma_yaml.get('detection', {})
+        if not detection:
+            return None, "No detection section found in Sigma rule"
         
-        # Clean up temporary files
-        if os.path.exists(temp_sigma_path):
-            os.unlink(temp_sigma_path)
-        if temp_config_path and os.path.exists(temp_config_path):
-            os.unlink(temp_config_path)
+        # Helper function to convert a condition to SPL
+        def condition_to_spl(condition, searches):
+            # Handle basic AND/OR logic
+            condition = re.sub(r'\s+and\s+', ' AND ', condition, flags=re.IGNORECASE)
+            condition = re.sub(r'\s+or\s+', ' OR ', condition, flags=re.IGNORECASE)
+            
+            # Replace search identifiers with their queries
+            for search_id, search_query in searches.items():
+                if search_id in condition:
+                    # Wrap in parentheses if it's a complex query
+                    if ' AND ' in search_query or ' OR ' in search_query:
+                        condition = condition.replace(search_id, f"({search_query})")
+                    else:
+                        condition = condition.replace(search_id, search_query)
+            
+            return condition
         
-        if result.returncode != 0:
-            return None, f"Sigma conversion error: {result.stderr}"
+        # Process each search pattern
+        searches = {}
+        for key, value in detection.items():
+            if key == 'condition':
+                continue
+                
+            if isinstance(value, dict):
+                # Handle field-value pairs
+                query_parts = []
+                for field, field_value in value.items():
+                    # Apply field mapping if available
+                    if field_mapping and field in field_mapping:
+                        mapped_field = field_mapping[field]
+                    else:
+                        mapped_field = field
+                    
+                    # Handle different value types
+                    if isinstance(field_value, list):
+                        values = [f'"{v}"' if ' ' in str(v) else str(v) for v in field_value]
+                        value_str = " OR ".join([f"{mapped_field}={val}" for val in values])
+                        if len(values) > 1:
+                            value_str = f"({value_str})"
+                        query_parts.append(value_str)
+                    else:
+                        if ' ' in str(field_value):
+                            field_value = f'"{field_value}"'
+                        query_parts.append(f"{mapped_field}={field_value}")
+                
+                searches[key] = " AND ".join(query_parts)
         
-        return result.stdout.strip(), None
+        # Get the condition
+        condition = detection.get('condition', '')
+        if not condition:
+            return None, "No condition found in detection section"
+        
+        # Convert the condition to SPL
+        spl_query = condition_to_spl(condition, searches)
+        
+        # Add search prefix
+        final_query = f"search {spl_query}"
+        
+        # Add index if specified
+        if 'logsource' in sigma_yaml and 'product' in sigma_yaml['logsource']:
+            product = sigma_yaml['logsource']['product']
+            final_query = f"index={product} {final_query}"
+        
+        return final_query, None
     
     except Exception as e:
         logging.error(f"Error converting Sigma rule: {str(e)}")
