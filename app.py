@@ -40,31 +40,50 @@ with app.app_context():
     # Import models to ensure tables are created
     import models  # noqa: F401
     
-    db.create_all()
+    # Try to create tables safely
+    try:
+        db.create_all()
+        logging.info("Database tables created successfully")
+        
+        # Initialize default data if needed
+        from models import FieldMapping, SplunkSettings
+        
+        # Add default field mapping if it doesn't exist
+        try:
+            mapping_count = FieldMapping.query.count()
+            if mapping_count == 0:
+                default_mapping = FieldMapping(
+                    mapping_data={
+                        "Image": "NewProcessName",
+                        "ParentImage": "ParentProcessName",
+                        "CommandLine": "CommandLine",
+                        "User": "User",
+                        "IntegrityLevel": "IntegrityLevel"
+                    }
+                )
+                db.session.add(default_mapping)
+                db.session.commit()
+                logging.info("Default field mapping created")
+        except Exception as e:
+            db.session.rollback()
+            logging.warning(f"Error checking or creating field mappings: {e}")
+        
+        # Add default Splunk settings if they don't exist
+        try:
+            settings_count = SplunkSettings.query.count()
+            if settings_count == 0:
+                default_settings = SplunkSettings(
+                    host="splunk-server.example.com",
+                    port=8089,
+                    username="admin",
+                    password="changeme"
+                )
+                db.session.add(default_settings)
+                db.session.commit()
+                logging.info("Default Splunk settings created")
+        except Exception as e:
+            db.session.rollback()
+            logging.warning(f"Error checking or creating Splunk settings: {e}")
     
-    # Initialize default data if needed
-    from models import FieldMapping, SplunkSettings
-    
-    # Add default field mapping if it doesn't exist
-    if FieldMapping.query.count() == 0:
-        default_mapping = FieldMapping(
-            mapping_data={
-                "user.name": "user", 
-                "process.name": "proc"
-            }
-        )
-        db.session.add(default_mapping)
-        db.session.commit()
-        logging.info("Default field mapping created")
-    
-    # Add default Splunk settings if they don't exist
-    if SplunkSettings.query.count() == 0:
-        default_settings = SplunkSettings(
-            host="192.168.128.224",
-            port=8089,
-            username="salah",
-            password="asd@12345"
-        )
-        db.session.add(default_settings)
-        db.session.commit()
-        logging.info("Default Splunk settings created")
+    except Exception as e:
+        logging.error(f"Error setting up database: {e}")

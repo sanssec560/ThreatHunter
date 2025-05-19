@@ -18,7 +18,7 @@ except:
 
 def convert_sigma_to_spl(sigma_rule, field_mapping=None):
     """
-    Convert a Sigma rule to Splunk SPL query
+    Convert a Sigma rule to Splunk SPL query using custom implementation
     
     Args:
         sigma_rule (str): The Sigma rule content
@@ -27,95 +27,8 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
     Returns:
         tuple: (spl_query, error_message)
     """
-    try:
-        import yaml
-        import re
-        import json
-        import tempfile
-        import subprocess
-        import os
-        
-        # Create a temporary file for the sigma rule
-        temp_path = None
-        try:
-            # First try using sigma-cli
-            with tempfile.NamedTemporaryFile(mode='w+', suffix='.yml', delete=False) as temp_file:
-                temp_file.write(sigma_rule)
-                temp_path = temp_file.name
-            
-            # Run sigma convert command
-            command = ["sigma", "convert", "-t", "splunk", temp_path]
-            result = subprocess.run(command, capture_output=True, text=True)
-            
-            # Clean up temp file
-            if temp_path and os.path.exists(temp_path):
-                os.unlink(temp_path)
-                temp_path = None
-            
-            if result.returncode == 0:
-                splunk_query = result.stdout.strip()
-            else:
-                # If sigma-cli fails, fall back to our custom implementation
-                return custom_sigma_to_spl(sigma_rule, field_mapping)
-        
-            # Parse the sigma rule for post-processing
-            sigma_yaml = yaml.safe_load(sigma_rule)
-            
-            # Post-process the query for specific rule types
-            if sigma_yaml and 'logsource' in sigma_yaml:
-                logsource = sigma_yaml['logsource']
-                
-                # Process Windows process creation events
-                if ('category' in logsource and logsource['category'] == 'process_creation' and
-                    'product' in logsource and logsource['product'] == 'windows'):
-                    
-                    # Add Security log source
-                    if 'source="WinEventLog:Security"' not in splunk_query:
-                        splunk_query = splunk_query.replace('index=windows', 'index=* source="WinEventLog:Security"')
-                    
-                    # Add EventCode
-                    if 'EventCode=4688' not in splunk_query:
-                        splunk_query = add_event_code_to_query(splunk_query, "4688")
-            
-            # Apply field mappings if provided
-            if field_mapping:
-                for sigma_field, splunk_field in field_mapping.items():
-                    # Replace the field names in the query
-                    splunk_query = re.sub(rf'\b{re.escape(sigma_field)}\b(?==)', splunk_field, splunk_query)
-            
-            # Handle the contains|all modifiers specially
-            if '|contains|all' in sigma_rule:
-                # Find fields with contains|all modifier
-                field_matches = re.findall(r'(\w+)\|contains\|all', sigma_rule)
-                for field in field_matches:
-                    # Find patterns like (field="*val1*" OR field="*val2*") and convert to AND
-                    pattern = re.compile(rf'\(\s*({field})="[^"]*"\s+OR\s+(?:\1="[^"]*"\s+OR\s+)*\1="[^"]*"\s*\)')
-                    matches = pattern.findall(splunk_query)
-                    if matches:
-                        for match in matches:
-                            # Get the full pattern match
-                            pattern = re.compile(rf'\(\s*{re.escape(match)}="[^"]*"\s+OR\s+(?:{re.escape(match)}="[^"]*"\s+OR\s+)*{re.escape(match)}="[^"]*"\s*\)')
-                            full_matches = pattern.findall(splunk_query)
-                            for full_match in full_matches:
-                                new_match = full_match.replace(' OR ', ' AND ')
-                                splunk_query = splunk_query.replace(full_match, new_match)
-            
-            return splunk_query, None
-        
-        except yaml.YAMLError as e:
-            return None, f"Invalid YAML format: {str(e)}"
-        
-    except Exception as e:
-        logging.error(f"Error converting Sigma rule: {str(e)}")
-        return None, f"Error converting Sigma rule: {str(e)}"
-    
-    finally:
-        # Clean up any temporary files if they exist
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
+    # We'll use our custom implementation by default as it handles complex patterns better
+    return custom_sigma_to_spl(sigma_rule, field_mapping)
 
 def add_event_code_to_query(query, event_code):
     """Add EventCode to a Splunk query if it doesn't exist"""
