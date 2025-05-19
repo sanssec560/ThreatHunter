@@ -15,8 +15,8 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 def convert_sigma_to_spl(sigma_rule, field_mapping=None):
     """
-    Convert a Sigma rule to Splunk SPL query
-    This implementation targets exact Splunk syntax for complex rules
+    Convert a Sigma rule to Splunk SPL query using sigma-cli
+    This is the most recent and reliable way to convert Sigma rules
     
     Args:
         sigma_rule (str): The Sigma rule content
@@ -26,232 +26,101 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
         tuple: (spl_query, error_message)
     """
     try:
-        import yaml
-        import re
+        import tempfile
+        import subprocess
+        import os
+        import json
         
-        # Parse the sigma rule
+        # Create a temporary file for the sigma rule
         try:
+            with tempfile.NamedTemporaryFile(mode='w+', suffix='.yml', delete=False) as temp_file:
+                temp_file.write(sigma_rule)
+                temp_path = temp_file.name
+            
+            # Create a temporary file for field mappings if provided
+            mapping_path = None
+            if field_mapping:
+                with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as map_file:
+                    json.dump({"fieldmappings": field_mapping}, map_file)
+                    mapping_path = map_file.name
+            
+            # Build the sigma command
+            command = ["sigma", "convert", "-t", "splunk", "-f", "default", temp_path]
+            
+            # Add mapping file if provided
+            if mapping_path:
+                command.extend(["--mapping", mapping_path])
+            
+            # Execute the command
+            result = subprocess.run(command, capture_output=True, text=True)
+            
+            # Clean up temporary files
+            os.unlink(temp_path)
+            if mapping_path:
+                os.unlink(mapping_path)
+            
+            if result.returncode != 0:
+                return None, f"Sigma conversion error: {result.stderr}"
+            
+            # Get the output and clean it up
+            splunk_query = result.stdout.strip()
+            
+            # Customize query for specific rule categories if needed
+            import yaml
             sigma_yaml = yaml.safe_load(sigma_rule)
+            
+            # Add special handling for Windows process creation events
+            if sigma_yaml and 'logsource' in sigma_yaml:
+                logsource = sigma_yaml['logsource']
+                if 'category' in logsource and logsource['category'] == 'process_creation' and 'product' in logsource and logsource['product'] == 'windows':
+                    # Ensure the query includes the Security log source for Windows
+                    if 'source="WinEventLog:Security"' not in splunk_query:
+                        splunk_query = splunk_query.replace('index=windows', 'index=* source="WinEventLog:Security"')
+                    
+                    # Ensure EventCode is specified
+                    if 'EventCode=4688' not in splunk_query:
+                        if 'AND' in splunk_query:
+                            splunk_query = splunk_query.replace('AND', 'AND EventCode=4688 AND', 1)
+                        else:
+                            splunk_query += ' AND EventCode=4688'
+            
+            # Handle the contains|all modifiers that might not be properly converted
+            if '|contains|all' in sigma_rule:
+                # Replace any OR operators between values of the same field with AND operators
+                # This is a simplistic approach, for production a more robust parser would be needed
+                import re
+                fields = re.findall(r'(\w+)\|contains\|all', sigma_rule)
+                for field in fields:
+                    # Find patterns like (field="*val1*" OR field="*val2*") and convert to AND
+                    pattern = re.compile(rf'\(\s*{field}="[^"]*"\s+OR\s+(?:{field}="[^"]*"\s+OR\s+)*{field}="[^"]*"\s*\)')
+                    matches = pattern.findall(splunk_query)
+                    for match in matches:
+                        # Replace OR with AND in this match
+                        new_match = match.replace(' OR ', ' AND ')
+                        splunk_query = splunk_query.replace(match, new_match)
+            
+            return splunk_query, None
+            
         except yaml.YAMLError as e:
             return None, f"Invalid YAML format: {str(e)}"
-        
-        if not sigma_yaml:
-            return None, "Empty or invalid Sigma rule"
-        
-        # Field mapping for common Windows event fields
-        windows_field_mapping = {
-            'Image': 'NewProcessName',
-            'ParentImage': 'ParentProcessName',
-            'CommandLine': 'CommandLine',
-            'User': 'User',
-            'IntegrityLevel': 'IntegrityLevel'
-        }
-        
-        # Combine with user-provided field mapping
-        if field_mapping:
-            combined_mapping = {**windows_field_mapping, **field_mapping}
-        else:
-            combined_mapping = windows_field_mapping
             
-        # Extract fields from the detection section
-        detection = sigma_yaml.get('detection', {})
-        if not detection:
-            return None, "No detection section found in Sigma rule"
-        
-        # Process field modifiers
-        def process_field_with_modifiers(field, mapped_field):
-            # Handle common Sigma field modifiers
-            if '|contains|all' in field:
-                base_field = field.split('|')[0]
-                if combined_mapping and base_field in combined_mapping:
-                    mapped_base = combined_mapping[base_field]
-                else:
-                    mapped_base = base_field
-                return mapped_base, "contains_all"
-            elif '|contains' in field:
-                base_field = field.split('|')[0]
-                if combined_mapping and base_field in combined_mapping:
-                    mapped_base = combined_mapping[base_field]
-                else:
-                    mapped_base = base_field
-                return mapped_base, "contains"
-            elif '|startswith' in field:
-                base_field = field.split('|')[0]
-                if combined_mapping and base_field in combined_mapping:
-                    mapped_base = combined_mapping[base_field]
-                else:
-                    mapped_base = base_field
-                return mapped_base, "startswith"
-            elif '|endswith' in field:
-                base_field = field.split('|')[0]
-                if combined_mapping and base_field in combined_mapping:
-                    mapped_base = combined_mapping[base_field]
-                else:
-                    mapped_base = base_field
-                return mapped_base, "endswith"
-            else:
-                # Check if base field needs mapping
-                if combined_mapping and field in combined_mapping:
-                    mapped_field = combined_mapping[field]
-                return mapped_field, "equals"
-        
-        # Helper function to create a Splunk search term based on field and value
-        def create_search_term(field, value, modifier):
-            if modifier == "contains_all":
-                # This is a special case - do not create terms here, handle it separately
-                return None
-            elif modifier == "contains":
-                if isinstance(value, str) and '*' in value:
-                    # Handle wildcards
-                    return f'{field}="*{value}*"'
-                else:
-                    return f'{field}="*{value}*"'
-            elif modifier == "startswith":
-                return f'{field}="*{value}"'
-            elif modifier == "endswith":
-                return f'{field}="{value}*"'
-            else:  # equals
-                if isinstance(value, str):
-                    return f'{field}="{value}"'
-                else:
-                    return f'{field}="{value}"'
-        
-        # Process selection blocks
-        selections = {}
-        for key, value in detection.items():
-            if key == 'condition':
-                continue
-            
-            # Standard field-value pairs dictionary
-            if isinstance(value, dict):
-                query_parts = []
-                for field, field_value in value.items():
-                    # Map field name
-                    mapped_field, modifier = process_field_with_modifiers(field, field)
-                    
-                    # Handle different value types and modifiers
-                    if modifier == "contains_all" and isinstance(field_value, list):
-                        # For "contains|all" modifier, generate AND conditions
-                        values_parts = []
-                        for v in field_value:
-                            values_parts.append(f'{mapped_field}="*{v}*"')
-                        if len(values_parts) > 1:
-                            value_str = "(" + " AND ".join(values_parts) + ")"
-                        else:
-                            value_str = values_parts[0]
-                        query_parts.append(value_str)
-                    elif isinstance(field_value, list):
-                        values_parts = []
-                        for v in field_value:
-                            term = create_search_term(mapped_field, v, modifier)
-                            if term:  # Skip None values
-                                values_parts.append(term)
-                        if len(values_parts) > 1:
-                            value_str = "(" + " OR ".join(values_parts) + ")"
-                        elif len(values_parts) == 1:
-                            value_str = values_parts[0]
-                        else:
-                            continue  # Skip empty lists
-                        query_parts.append(value_str)
-                    else:
-                        term = create_search_term(mapped_field, field_value, modifier)
-                        if term:  # Skip None values
-                            query_parts.append(term)
-                
-                selections[key] = " AND ".join(query_parts)
-            
-            # Handle list of dictionaries (selection_special type entries)
-            elif isinstance(value, list):
-                all_condition_parts = []
-                
-                for item in value:
-                    if isinstance(item, dict):
-                        field_conditions = []
-                        for field, field_value in item.items():
-                            # Map the field
-                            mapped_field, modifier = process_field_with_modifiers(field, field)
-                            
-                            # Process values
-                            if isinstance(field_value, list):
-                                value_parts = []
-                                for v in field_value:
-                                    value_parts.append(create_search_term(mapped_field, v, modifier))
-                                if value_parts:
-                                    if len(value_parts) > 1:
-                                        field_conditions.append("(" + " OR ".join(value_parts) + ")")
-                                    else:
-                                        field_conditions.append(value_parts[0])
-                            else:
-                                field_conditions.append(create_search_term(mapped_field, field_value, modifier))
-                        
-                        if field_conditions:
-                            # Join multiple field conditions within one dict as OR
-                            all_condition_parts.append("(" + " OR ".join(field_conditions) + ")")
-                
-                if all_condition_parts:
-                    # Join different dicts as OR per the Sigma spec
-                    selections[key] = "(" + " OR ".join(all_condition_parts) + ")"
-        
-        # Process the condition
-        condition = detection.get('condition', '')
-        if not condition:
-            return None, "No condition found in detection section"
-        
-        # Replace condition syntax
-        splunk_condition = condition.lower()
-        
-        # Handle the "all of X*" syntax
-        if "all of" in splunk_condition and "*" in splunk_condition:
-            for prefix in [key.split('_')[0] for key in selections.keys() if '_' in key]:
-                pattern = f"all of {prefix}*"
-                if pattern in splunk_condition:
-                    # Find all keys that match the prefix
-                    matching_keys = [k for k in selections.keys() if k.startswith(prefix)]
-                    if matching_keys:
-                        combined = "(" + " AND ".join([f"({selections[k]})" for k in matching_keys]) + ")"
-                        splunk_condition = splunk_condition.replace(pattern, combined)
-        
-        # Replace selection references with their actual queries
-        for key, query in selections.items():
-            if key in splunk_condition:
-                # Wrap complex queries in parentheses
-                if ' AND ' in query or ' OR ' in query:
-                    splunk_condition = splunk_condition.replace(key, f"({query})")
-                else:
-                    splunk_condition = splunk_condition.replace(key, query)
-        
-        # Standard condition replacements
-        splunk_condition = splunk_condition.replace(" and ", " AND ")
-        splunk_condition = splunk_condition.replace(" or ", " OR ")
-        splunk_condition = splunk_condition.replace(" not ", " NOT ")
-        
-        # Build the complete query
-        if 'logsource' in sigma_yaml:
-            logsource = sigma_yaml['logsource']
-            if 'category' in logsource and logsource['category'] == 'process_creation':
-                # Standard process creation format
-                if 'product' in logsource and logsource['product'] == 'windows':
-                    # Specific format for Windows process creation
-                    base_query = 'index=* source="WinEventLog:Security" AND EventCode=4688 AND '
-                else:
-                    base_query = 'index=* EventCode=4688 AND '
-            else:
-                # Default format
-                if 'product' in logsource:
-                    base_query = f'index={logsource["product"]} AND '
-                else:
-                    base_query = 'index=* AND '
-        else:
-            base_query = 'index=* AND '
-        
-        # Combine everything
-        final_query = base_query + splunk_condition
-        
-        return final_query, None
-    
     except Exception as e:
         logging.error(f"Error converting Sigma rule: {str(e)}")
         return None, f"Error converting Sigma rule: {str(e)}"
+    
+    finally:
+        # Clean up any temporary files if they exist
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+                
+        if 'mapping_path' in locals() and mapping_path and os.path.exists(mapping_path):
+            try:
+                os.unlink(mapping_path)
+            except:
+                pass
 
 def get_time_range_params(time_range):
     """
