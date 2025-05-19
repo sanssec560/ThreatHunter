@@ -61,7 +61,14 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
         # Process field modifiers
         def process_field_with_modifiers(field, mapped_field):
             # Handle common Sigma field modifiers
-            if '|contains' in field:
+            if '|contains|all' in field:
+                base_field = field.split('|')[0]
+                if combined_mapping and base_field in combined_mapping:
+                    mapped_base = combined_mapping[base_field]
+                else:
+                    mapped_base = base_field
+                return mapped_base, "contains_all"
+            elif '|contains' in field:
                 base_field = field.split('|')[0]
                 if combined_mapping and base_field in combined_mapping:
                     mapped_base = combined_mapping[base_field]
@@ -90,7 +97,10 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
         
         # Helper function to create a Splunk search term based on field and value
         def create_search_term(field, value, modifier):
-            if modifier == "contains":
+            if modifier == "contains_all":
+                # This is a special case - do not create terms here, handle it separately
+                return None
+            elif modifier == "contains":
                 if isinstance(value, str) and '*' in value:
                     # Handle wildcards
                     return f'{field}="*{value}*"'
@@ -119,18 +129,34 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
                     # Map field name
                     mapped_field, modifier = process_field_with_modifiers(field, field)
                     
-                    # Handle different value types
-                    if isinstance(field_value, list):
+                    # Handle different value types and modifiers
+                    if modifier == "contains_all" and isinstance(field_value, list):
+                        # For "contains|all" modifier, generate AND conditions
                         values_parts = []
                         for v in field_value:
-                            values_parts.append(create_search_term(mapped_field, v, modifier))
+                            values_parts.append(f'{mapped_field}="*{v}*"')
                         if len(values_parts) > 1:
-                            value_str = "(" + " OR ".join(values_parts) + ")"
+                            value_str = "(" + " AND ".join(values_parts) + ")"
                         else:
                             value_str = values_parts[0]
                         query_parts.append(value_str)
+                    elif isinstance(field_value, list):
+                        values_parts = []
+                        for v in field_value:
+                            term = create_search_term(mapped_field, v, modifier)
+                            if term:  # Skip None values
+                                values_parts.append(term)
+                        if len(values_parts) > 1:
+                            value_str = "(" + " OR ".join(values_parts) + ")"
+                        elif len(values_parts) == 1:
+                            value_str = values_parts[0]
+                        else:
+                            continue  # Skip empty lists
+                        query_parts.append(value_str)
                     else:
-                        query_parts.append(create_search_term(mapped_field, field_value, modifier))
+                        term = create_search_term(mapped_field, field_value, modifier)
+                        if term:  # Skip None values
+                            query_parts.append(term)
                 
                 selections[key] = " AND ".join(query_parts)
             
