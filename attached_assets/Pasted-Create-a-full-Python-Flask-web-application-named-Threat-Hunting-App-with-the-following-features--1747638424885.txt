@@ -1,0 +1,44 @@
+Create a full Python Flask web application named "Threat Hunting App" with the following features:
+
+1. **Core Functionality:**
+   - Accept a **Sigma rule** as input.
+   - Convert the Sigma rule to a **Splunk SPL query** using `sigmac`.
+   - Allow user to **view and modify** the converted SPL query before running.
+   - Execute the SPL query via Splunk's **REST API** (HTTPS on `192.168.128.224:8089`, username: `salah`, password: `asd@12345`).
+   - Include a **time range dropdown** (`All time`, `Last 1 year`, `Last 30 days`).
+
+2. **Database Storage (PostgreSQL):**
+   - Store each search in PostgreSQL:
+     - Original Sigma rule
+     - Converted Splunk query
+     - Search results (as plain text or JSON)
+     - Timestamp of execution
+
+3. **Pages/Routes:**
+   - `/` (Home): Buttons to go to “Run Query”, “View Results”, “Field Mapping”, “Settings”.
+   - `/query`: Input a Sigma rule, view/modify SPL query, run the search, see results.
+   - `/results`: View past queries from PostgreSQL with Sigma, SPL, results, and time.
+   - `/mapping`: View/edit the **field mapping** (e.g., `{ "user.name": "user", "process.name": "proc" }`). Save to PostgreSQL.
+   - `/settings`: Edit and save Splunk connection settings (host, username, password) to PostgreSQL.
+   - `/test-connection`: Button to test Splunk REST API connection.
+
+4. **Additional Requirements:**
+   - Use **`Flask`**, `requests`, `psycopg2-binary`, `sqlalchemy`, `fuzzywuzzy`, `python-Levenshtein`.
+   - Use **Bootstrap or simple CSS** for basic UI.
+   - Use `sigmac` for Sigma rule conversion to SPL.
+   - Include a basic **SQLite fallback** if PostgreSQL is not connected (optional).
+
+5. **Default Field Map:**
+   - On first run, insert a default map like: `{ "user.name": "user", "process.name": "proc" }`.
+   - Allow fuzzy matching to suggest new mappings on the field mapping page.
+
+6. **Extra Features:**
+   - Add a header with a **“Test Splunk Connection”** button on all pages.
+   - When modifying field mapping, store the final JSON map for future conversions.
+   - Make the app layout responsive and easy to navigate.
+
+Provide all backend code, `requirements.txt`, HTML templates in `templates/`, and clear instructions for running locally with PostgreSQL.
+
+Use database: `threathunter`, username: `hunter`, password: `hunter123`.
+
+Be creative and design the app like an experienced threat hunter would — intuitive for analysts, and optimized for quick, interactive investigations.
