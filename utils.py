@@ -16,7 +16,7 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 def convert_sigma_to_spl(sigma_rule, field_mapping=None):
     """
     Convert a Sigma rule to Splunk SPL query
-    This implementation is designed to properly handle Splunk's syntax requirements
+    This implementation handles complex Sigma rules with nested conditions
     
     Args:
         sigma_rule (str): The Sigma rule content
@@ -88,32 +88,15 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
                 else:
                     return f'{field}={value}'
         
-        # Helper function to convert a condition to SPL
-        def condition_to_spl(condition, searches):
-            # Handle basic AND/OR logic
-            condition = re.sub(r'\s+and\s+', ' AND ', condition, flags=re.IGNORECASE)
-            condition = re.sub(r'\s+or\s+', ' OR ', condition, flags=re.IGNORECASE)
-            condition = re.sub(r'\s+not\s+', ' NOT ', condition, flags=re.IGNORECASE)
-            
-            # Replace search identifiers with their queries
-            for search_id, search_query in searches.items():
-                if search_id in condition:
-                    # Wrap in parentheses if it's a complex query
-                    if ' AND ' in search_query or ' OR ' in search_query:
-                        condition = re.sub(r'\b' + re.escape(search_id) + r'\b', f"({search_query})", condition)
-                    else:
-                        condition = re.sub(r'\b' + re.escape(search_id) + r'\b', search_query, condition)
-            
-            return condition
-        
-        # Process each search pattern
+        # Process each search pattern to handle nested structures
         searches = {}
         for key, value in detection.items():
             if key == 'condition':
                 continue
-                
+            
+            # Handle different types of detection items
             if isinstance(value, dict):
-                # Handle field-value pairs
+                # Standard field-value pairs
                 query_parts = []
                 for field, field_value in value.items():
                     # Apply field mapping if available
@@ -139,26 +122,115 @@ def convert_sigma_to_spl(sigma_rule, field_mapping=None):
                         query_parts.append(create_search_term(mapped_field, field_value, modifier))
                 
                 searches[key] = " AND ".join(query_parts)
+            
+            elif isinstance(value, list):
+                # For lists of dicts, handle each entry as a separate condition group
+                list_parts = []
+                
+                for item in value:
+                    if isinstance(item, dict):
+                        item_parts = []
+                        for sub_field, sub_value in item.items():
+                            # Apply field mapping
+                            if field_mapping and sub_field.split('|')[0] in field_mapping:
+                                mapped_sub_field = field_mapping[sub_field.split('|')[0]]
+                            else:
+                                mapped_sub_field = sub_field.split('|')[0]
+                            
+                            # Process field modifiers
+                            mapped_sub_field, sub_modifier = process_field_with_modifiers(sub_field, mapped_sub_field)
+                            
+                            # Handle different value types
+                            if isinstance(sub_value, list):
+                                sub_values_parts = []
+                                for v in sub_value:
+                                    sub_values_parts.append(create_search_term(mapped_sub_field, v, sub_modifier))
+                                if len(sub_values_parts) > 1:
+                                    sub_value_str = "(" + " OR ".join(sub_values_parts) + ")"
+                                else:
+                                    sub_value_str = sub_values_parts[0]
+                                item_parts.append(sub_value_str)
+                            else:
+                                item_parts.append(create_search_term(mapped_sub_field, sub_value, sub_modifier))
+                        
+                        if item_parts:
+                            list_parts.append("(" + " AND ".join(item_parts) + ")")
+                
+                if list_parts:
+                    searches[key] = " OR ".join(list_parts)
         
-        # Get the condition
+        # Helper function to convert condition to SPL with support for complex conditions
+        def parse_condition(condition, searches):
+            # Preprocess the condition - standardize syntax
+            condition = re.sub(r'\s+and\s+', ' AND ', condition, flags=re.IGNORECASE)
+            condition = re.sub(r'\s+or\s+', ' OR ', condition, flags=re.IGNORECASE)
+            condition = re.sub(r'\s+not\s+', ' NOT ', condition, flags=re.IGNORECASE)
+            condition = re.sub(r'all\s+of\s+([a-zA-Z0-9_*]+)', r'\1', condition, flags=re.IGNORECASE)
+            condition = re.sub(r'1\s+of\s+([a-zA-Z0-9_*]+)', r'\1', condition, flags=re.IGNORECASE)
+            
+            # Handle special syntax like "all of selection*"
+            if "all of" in condition.lower() and "*" in condition:
+                pattern = re.compile(r'all\s+of\s+([a-zA-Z0-9_]+)\*', re.IGNORECASE)
+                match = pattern.search(condition)
+                if match:
+                    prefix = match.group(1)
+                    wildcard_keys = [k for k in searches.keys() if k.startswith(prefix)]
+                    if wildcard_keys:
+                        replacement = "(" + " AND ".join([f"({searches[k]})" for k in wildcard_keys]) + ")"
+                        condition = pattern.sub(replacement, condition)
+            
+            # Handle "1 of them" condition
+            if "1 of them" in condition.lower():
+                # Replace with OR of all search terms
+                search_terms = []
+                for search_id, search_query in searches.items():
+                    search_terms.append(f"({search_query})")
+                if search_terms:
+                    condition = "(" + " OR ".join(search_terms) + ")"
+            
+            # Process remaining references to search terms
+            for search_id, search_query in searches.items():
+                if search_id in condition:
+                    # Use word boundary to prevent partial matches
+                    pattern = r'\b' + re.escape(search_id) + r'\b'
+                    # Wrap in parentheses if it's a complex query
+                    if ' AND ' in search_query or ' OR ' in search_query:
+                        replacement = f"({search_query})"
+                    else:
+                        replacement = search_query
+                    condition = re.sub(pattern, replacement, condition)
+            
+            return condition
+        
+        # Get and process the condition
         condition = detection.get('condition', '')
         if not condition:
             return None, "No condition found in detection section"
         
         # Convert the condition to SPL
-        spl_query = condition_to_spl(condition, searches)
+        spl_query = parse_condition(condition, searches)
         
         # Build the final SPL query
         query_parts = []
         
-        # Add index if specified in logsource
+        # Add source information from logsource
         if 'logsource' in sigma_yaml:
             logsource = sigma_yaml['logsource']
+            index_added = False
+            
+            # Process logosurce information
             if 'product' in logsource:
                 query_parts.append(f"index={logsource['product']}")
+                index_added = True
+            
             if 'service' in logsource:
                 query_parts.append(f"sourcetype={logsource['service']}")
-        
+            
+            if 'category' in logsource and logsource['category'] == 'process_creation':
+                if not index_added:
+                    query_parts.append("index=windows")
+                query_parts.append("EventCode=4688")
+            
         # Add the main search condition
         query_parts.append(spl_query)
         
